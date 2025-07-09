@@ -3,8 +3,20 @@
 # ================================
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Set environment variables
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
+# Validate that API key is loaded
+if not os.getenv("OPENAI_API_KEY"):
+    print("❌ Error: OPENAI_API_KEY not found in environment variables!")
+    print("Please create a .env file with your OpenAI API key:")
+    print("OPENAI_API_KEY=your_openai_api_key_here")
+    exit(1)
 
 from typing import Annotated, List, Dict, Any
 from typing_extensions import TypedDict
@@ -17,9 +29,17 @@ import json
 # Initialize LLM
 try:
     llm = init_chat_model("openai:gpt-4o-mini")
-except Exception:
-    from langchain_openai import ChatOpenAI
-    llm = ChatOpenAI(model="gpt-4o-mini")
+    print("✅ LLM initialized successfully")
+except Exception as e:
+    print(f"❌ Error initializing LLM: {e}")
+    try:
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(model="gpt-4o-mini")
+        print("✅ LLM initialized with fallback method")
+    except Exception as e2:
+        print(f"❌ Failed to initialize LLM: {e2}")
+        print("Please check your OpenAI API key and internet connection")
+        exit(1)
 
 # State Definition
 class BusinessState(TypedDict):
@@ -39,6 +59,8 @@ class BusinessState(TypedDict):
 # Input Node
 def input_node(state: BusinessState) -> BusinessState:
     """Receive and validate business data"""
+    
+    print("📊 Loading business data...")
     
     # Sample data - in practice this would come from API or database
     today_data = {
@@ -64,6 +86,8 @@ def input_node(state: BusinessState) -> BusinessState:
 # Processing Node
 def processing_node(state: BusinessState) -> BusinessState:
     """Calculate key business metrics"""
+    
+    print("⚙️ Calculating business metrics...")
     
     today = state["today_data"]
     yesterday = state["yesterday_data"]
@@ -111,6 +135,8 @@ def processing_node(state: BusinessState) -> BusinessState:
 def analysis_node(state: BusinessState) -> BusinessState:
     """Generate alerts and intelligent analysis"""
     
+    print("🔍 Analyzing business performance...")
+    
     metrics = state["metrics"]
     alerts = []
     
@@ -144,6 +170,8 @@ def analysis_node(state: BusinessState) -> BusinessState:
 # Recommendation Node
 def recommendation_node(state: BusinessState) -> BusinessState:
     """Generate actionable recommendations using LLM"""
+    
+    print("💡 Generating AI-powered recommendations...")
     
     metrics = state["metrics"]
     today = state["today_data"]
@@ -201,6 +229,8 @@ def recommendation_node(state: BusinessState) -> BusinessState:
             recommendations = [recommendations_text]
             
     except Exception as e:
+        print(f"⚠️ Warning: LLM error ({e}), using fallback recommendations")
+        
         # Fallback recommendations in case of error
         recommendations = [
             "Error connecting to LLM - using baseline recommendations",
@@ -227,6 +257,8 @@ def recommendation_node(state: BusinessState) -> BusinessState:
 # Output Node
 def output_node(state: BusinessState) -> BusinessState:
     """Generate final JSON report"""
+    
+    print("📋 Generating final report...")
     
     final_report = {
         "business_summary": {
@@ -282,6 +314,8 @@ def create_business_graph():
 def run_business_analysis():
     """Run complete business analysis"""
     
+    print("🚀 Starting business analysis...")
+    
     # Create graph
     graph = create_business_graph()
     
@@ -298,6 +332,7 @@ def run_business_analysis():
     
     result = graph.invoke(initial_state)
     
+    print("✅ Analysis completed successfully!")
     return result
 
 # Display results function
@@ -340,6 +375,11 @@ app = create_business_graph()
 
 # Run test
 if __name__ == "__main__":
-    print("🚀 Starting business analysis...")
-    result = run_business_analysis()
-    display_results(result)
+    try:
+        result = run_business_analysis()
+        display_results(result)
+    except KeyboardInterrupt:
+        print("\n⚠️ Analysis interrupted by user")
+    except Exception as e:
+        print(f"\n❌ Error during analysis: {e}")
+        print("Please check your configuration and try again")

@@ -1,18 +1,41 @@
+# ================================
+# Business Analytics Chat System - Fixed Version
+# ================================
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Set environment variables
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+
+# Validate that API key is loaded
+if not os.getenv("OPENAI_API_KEY"):
+    print("❌ Error: OPENAI_API_KEY not found in environment variables!")
+    print("Please create a .env file with your OpenAI API key:")
+    print("OPENAI_API_KEY=your_openai_api_key_here")
+    exit(1)
+
 from typing import Annotated, List, Dict, Any, Union
 from typing_extensions import TypedDict
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-import os
 import json
 from datetime import datetime, timedelta
 import random
 
-# Set your OpenAI API key
-
 # Initialize the chat model
-llm = init_chat_model("openai:gpt-4o-mini")
+try:
+    llm = init_chat_model("openai:gpt-4o-mini")
+    print("✅ LLM initialized successfully")
+except Exception as e:
+    print(f"❌ Error initializing LLM: {e}")
+    print("Please check your OpenAI API key and internet connection")
+    exit(1)
 
 # Sample business data (simulating a database)
 BUSINESS_DATA = {
@@ -179,40 +202,79 @@ def analyze_business(state: State) -> Dict:
     Also, at the end, provide a JSON summary with key metrics and recommendations.
     """
     
-    # Generate analysis using LLM
-    analysis_response = llm.invoke([HumanMessage(content=analysis_prompt)])
-    
-    # Generate JSON output using LLM
-    json_prompt = f"""
-    Based on the business data analysis for {selected_date}, create a structured JSON output with the following format:
-    
-    Current Day: Revenue ${current['revenue']:,}, Cost ${current['cost']:,}, Customers {current['customers']}
-    Previous Day: Revenue ${previous['revenue']:,}, Cost ${previous['cost']:,}, Customers {previous['customers']}
-    
-    Create a JSON with these keys:
-    - profit_loss_status: "positive" or "negative"
-    - current_profit: calculated profit value
-    - alerts: array of alert messages
-    - recommendations: array of actionable recommendations
-    - key_metrics: object with percentage changes and important metrics
-    
-    Return only valid JSON without any explanation.
-    """
-    
-    json_response = llm.invoke([HumanMessage(content=json_prompt)])
-    
-    # Parse JSON response
     try:
-        json_output = json.loads(json_response.content)
-    except json.JSONDecodeError:
-        # Fallback JSON if parsing fails
+        print("🤖 Generating analysis with AI...")
+        # Generate analysis using LLM
+        analysis_response = llm.invoke([HumanMessage(content=analysis_prompt)])
+        
+        # Generate JSON output using LLM
+        json_prompt = f"""
+        Based on the business data analysis for {selected_date}, create a structured JSON output with the following format:
+        
+        Current Day: Revenue ${current['revenue']:,}, Cost ${current['cost']:,}, Customers {current['customers']}
+        Previous Day: Revenue ${previous['revenue']:,}, Cost ${previous['cost']:,}, Customers {previous['customers']}
+        
+        Create a JSON with these keys:
+        - profit_loss_status: "positive" or "negative"
+        - current_profit: calculated profit value
+        - alerts: array of alert messages
+        - recommendations: array of actionable recommendations
+        - key_metrics: object with percentage changes and important metrics
+        
+        Return only valid JSON without any explanation.
+        """
+        
+        json_response = llm.invoke([HumanMessage(content=json_prompt)])
+        
+        # Parse JSON response
+        try:
+            json_output = json.loads(json_response.content)
+        except json.JSONDecodeError:
+            print("⚠️ Warning: Could not parse LLM JSON response, using fallback")
+            # Fallback JSON if parsing fails
+            current_profit = current["revenue"] - current["cost"]
+            json_output = {
+                "profit_loss_status": "positive" if current_profit > 0 else "negative",
+                "current_profit": current_profit,
+                "alerts": ["Unable to parse LLM JSON response"],
+                "recommendations": ["Review analysis manually"],
+                "key_metrics": {"error": "JSON parsing failed"}
+            }
+        
+    except Exception as e:
+        print(f"⚠️ Warning: LLM error ({e}), using fallback analysis")
+        
+        # Fallback analysis if LLM fails
         current_profit = current["revenue"] - current["cost"]
+        revenue_change = ((current["revenue"] - previous["revenue"]) / previous["revenue"]) * 100
+        cost_change = ((current["cost"] - previous["cost"]) / previous["cost"]) * 100
+        
+        analysis_response = type('obj', (object,), {
+            'content': f"""📊 **Business Analysis for {selected_date}** (Fallback Mode)
+            
+💰 **Financial Summary:**
+- Current Profit: ${current_profit:,}
+- Revenue Change: {revenue_change:.1f}%
+- Cost Change: {cost_change:.1f}%
+
+📈 **Key Insights:**
+- {"Profitable day" if current_profit > 0 else "Loss incurred"}
+- Revenue {"increased" if revenue_change > 0 else "decreased"} compared to previous day
+- Cost efficiency needs attention if costs grew faster than revenue
+
+⚠️ **Note:** This is a basic analysis due to LLM connectivity issues."""
+        })()
+        
         json_output = {
             "profit_loss_status": "positive" if current_profit > 0 else "negative",
             "current_profit": current_profit,
-            "alerts": ["Unable to parse LLM JSON response"],
-            "recommendations": ["Review analysis manually"],
-            "key_metrics": {"error": "JSON parsing failed"}
+            "alerts": ["LLM unavailable - basic analysis provided"],
+            "recommendations": ["Review detailed financials", "Check operational efficiency"],
+            "key_metrics": {
+                "revenue_change": f"{revenue_change:.1f}%",
+                "cost_change": f"{cost_change:.1f}%",
+                "profit": current_profit
+            }
         }
     
     # Combine LLM analysis with JSON output
@@ -245,12 +307,27 @@ def generate_greeting(state: State) -> Dict:
     End with asking the user to enter a date in YYYY-MM-DD format.
     """
     
-    greeting_response = llm.invoke([HumanMessage(content=greeting_prompt)])
-    
-    return {
-        "messages": [AIMessage(content=greeting_response.content)],
-        "stage": "date_selection"
-    }
+    try:
+        greeting_response = llm.invoke([HumanMessage(content=greeting_prompt)])
+        return {
+            "messages": [AIMessage(content=greeting_response.content)],
+            "stage": "date_selection"
+        }
+    except Exception as e:
+        print(f"⚠️ Warning: LLM error for greeting ({e}), using fallback")
+        # Fallback greeting
+        fallback_greeting = f"""Hello! I'm your Business Analytics Assistant. 🤖
+        
+To analyze your sales and cost data, please select a date from the available data.
+
+{get_data_table()}
+
+💡 Please enter the date you'd like to analyze in YYYY-MM-DD format (e.g., 2024-01-05)"""
+        
+        return {
+            "messages": [AIMessage(content=fallback_greeting)],
+            "stage": "date_selection"
+        }
 
 # Enhanced process_input function
 def process_input_enhanced(state: State) -> Dict:
@@ -270,127 +347,199 @@ def process_input_enhanced(state: State) -> Dict:
             prev_date = (date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
             
             if prev_date not in BUSINESS_DATA:
-                # Use LLM to generate error message
-                error_prompt = f"""
-                User selected date {user_input} but there's no data for the previous day ({prev_date}).
-                Generate a helpful error message asking them to select a date that has previous day data.
-                Be friendly and guide them to make a better selection.
+                try:
+                    # Use LLM to generate error message
+                    error_prompt = f"""
+                    User selected date {user_input} but there's no data for the previous day ({prev_date}).
+                    Generate a helpful error message asking them to select a date that has previous day data.
+                    Be friendly and guide them to make a better selection.
+                    """
+                    error_response = llm.invoke([HumanMessage(content=error_prompt)])
+                    
+                    return {
+                        "messages": [AIMessage(content=error_response.content)],
+                        "stage": "date_selection"
+                    }
+                except Exception:
+                    # Fallback error message
+                    return {
+                        "messages": [AIMessage(content="⚠️ Sorry, no data available for the previous day. Please select a date that has previous day data for comparison.")],
+                        "stage": "date_selection"
+                    }
+            
+            try:
+                # Use LLM to generate confirmation message
+                confirm_prompt = f"""
+                User selected date {user_input} for analysis. 
+                Generate a confirmation message that:
+                1. Confirms the date selection
+                2. Asks if they want to proceed with the analysis
+                3. Be encouraging and professional
                 """
-                error_response = llm.invoke([HumanMessage(content=error_prompt)])
+                confirm_response = llm.invoke([HumanMessage(content=confirm_prompt)])
                 
                 return {
-                    "messages": [AIMessage(content=error_response.content)],
+                    "messages": [AIMessage(content=confirm_response.content)],
+                    "selected_date": user_input,
+                    "stage": "confirm_analysis"
+                }
+            except Exception:
+                # Fallback confirmation
+                return {
+                    "messages": [AIMessage(content=f"✅ Date {user_input} selected.\n\nDo you want me to analyze the business data for this date? (yes/no)")],
+                    "selected_date": user_input,
+                    "stage": "confirm_analysis"
+                }
+        else:
+            try:
+                # Use LLM to generate invalid date message
+                invalid_prompt = f"""
+                User entered invalid date: {user_input}
+                Available dates: {list(BUSINESS_DATA.keys())}
+                Generate a helpful error message asking them to select a valid date from the table.
+                """
+                invalid_response = llm.invoke([HumanMessage(content=invalid_prompt)])
+                
+                return {
+                    "messages": [AIMessage(content=invalid_response.content)],
                     "stage": "date_selection"
                 }
-            
-            # Use LLM to generate confirmation message
-            confirm_prompt = f"""
-            User selected date {user_input} for analysis. 
-            Generate a confirmation message that:
-            1. Confirms the date selection
-            2. Asks if they want to proceed with the analysis
-            3. Be encouraging and professional
-            """
-            confirm_response = llm.invoke([HumanMessage(content=confirm_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=confirm_response.content)],
-                "selected_date": user_input,
-                "stage": "confirm_analysis"
-            }
-        else:
-            # Use LLM to generate invalid date message
-            invalid_prompt = f"""
-            User entered invalid date: {user_input}
-            Available dates: {list(BUSINESS_DATA.keys())}
-            Generate a helpful error message asking them to select a valid date from the table.
-            """
-            invalid_response = llm.invoke([HumanMessage(content=invalid_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=invalid_response.content)],
-                "stage": "date_selection"
-            }
+            except Exception:
+                # Fallback invalid date message
+                return {
+                    "messages": [AIMessage(content="❌ The entered date is not in the available data. Please select one of the dates from the table.")],
+                    "stage": "date_selection"
+                }
     
     elif stage == "confirm_analysis":
         if user_input.lower() in ["yes", "y", "yeah", "sure"]:
-            # Use LLM to generate analysis start message
-            start_prompt = "Generate an engaging message that indicates the business analysis is starting. Use emojis and be encouraging."
-            start_response = llm.invoke([HumanMessage(content=start_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=start_response.content)],
-                "stage": "analysis"
-            }
+            try:
+                # Use LLM to generate analysis start message
+                start_prompt = "Generate an engaging message that indicates the business analysis is starting. Use emojis and be encouraging."
+                start_response = llm.invoke([HumanMessage(content=start_prompt)])
+                
+                return {
+                    "messages": [AIMessage(content=start_response.content)],
+                    "stage": "analysis"
+                }
+            except Exception:
+                # Fallback start message
+                return {
+                    "messages": [AIMessage(content="🔍 Starting business data analysis...")],
+                    "stage": "analysis"
+                }
         elif user_input.lower() in ["no", "n", "nope"]:
-            # Use LLM to generate back to selection message
-            back_prompt = f"""
-            User declined analysis. Generate a message that:
-            1. Acknowledges their choice
-            2. Shows the data table again
-            3. Asks them to select a new date
-            
-            Include this table: {get_data_table()}
-            """
-            back_response = llm.invoke([HumanMessage(content=back_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=back_response.content)],
-                "stage": "date_selection",
-                "selected_date": ""
-            }
+            try:
+                # Use LLM to generate back to selection message
+                back_prompt = f"""
+                User declined analysis. Generate a message that:
+                1. Acknowledges their choice
+                2. Shows the data table again
+                3. Asks them to select a new date
+                
+                Include this table: {get_data_table()}
+                """
+                back_response = llm.invoke([HumanMessage(content=back_prompt)])
+                
+                return {
+                    "messages": [AIMessage(content=back_response.content)],
+                    "stage": "date_selection",
+                    "selected_date": ""
+                }
+            except Exception:
+                # Fallback back message
+                response = f"""{get_data_table()}
+
+💡 Please enter a new date you'd like to analyze:"""
+                return {
+                    "messages": [AIMessage(content=response)],
+                    "stage": "date_selection",
+                    "selected_date": ""
+                }
         else:
-            # Use LLM to generate clarification message
-            clarify_prompt = f"""
-            User gave unclear response: {user_input}
-            Generate a polite message asking them to clarify with yes or no.
-            """
-            clarify_response = llm.invoke([HumanMessage(content=clarify_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=clarify_response.content)],
-                "stage": "confirm_analysis"
-            }
+            try:
+                # Use LLM to generate clarification message
+                clarify_prompt = f"""
+                User gave unclear response: {user_input}
+                Generate a polite message asking them to clarify with yes or no.
+                """
+                clarify_response = llm.invoke([HumanMessage(content=clarify_prompt)])
+                
+                return {
+                    "messages": [AIMessage(content=clarify_response.content)],
+                    "stage": "confirm_analysis"
+                }
+            except Exception:
+                # Fallback clarification
+                return {
+                    "messages": [AIMessage(content="Please answer with 'yes' or 'no'. Do you want me to analyze the business data?")],
+                    "stage": "confirm_analysis"
+                }
     
     elif stage == "complete":
         if user_input.lower() in ["yes", "y", "yeah", "sure"]:
-            # Use LLM to generate new analysis prompt
-            new_prompt = f"""
-            User wants to analyze another date. Generate a message that:
-            1. Shows enthusiasm for another analysis
-            2. Displays the data table
-            3. Asks for new date selection
-            
-            Include this table: {get_data_table()}
-            """
-            new_response = llm.invoke([HumanMessage(content=new_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=new_response.content)],
-                "stage": "date_selection",
-                "selected_date": ""
-            }
+            try:
+                # Use LLM to generate new analysis prompt
+                new_prompt = f"""
+                User wants to analyze another date. Generate a message that:
+                1. Shows enthusiasm for another analysis
+                2. Displays the data table
+                3. Asks for new date selection
+                
+                Include this table: {get_data_table()}
+                """
+                new_response = llm.invoke([HumanMessage(content=new_prompt)])
+                
+                return {
+                    "messages": [AIMessage(content=new_response.content)],
+                    "stage": "date_selection",
+                    "selected_date": ""
+                }
+            except Exception:
+                # Fallback new analysis message
+                response = f"""{get_data_table()}
+
+💡 Please enter the new date you'd like to analyze:"""
+                return {
+                    "messages": [AIMessage(content=response)],
+                    "stage": "date_selection",
+                    "selected_date": ""
+                }
         elif user_input.lower() in ["no", "n", "nope"]:
-            # Use LLM to generate goodbye message
-            goodbye_prompt = "Generate a warm, professional goodbye message for a business analytics session."
-            goodbye_response = llm.invoke([HumanMessage(content=goodbye_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=goodbye_response.content)],
-                "stage": "end"
-            }
+            try:
+                # Use LLM to generate goodbye message
+                goodbye_prompt = "Generate a warm, professional goodbye message for a business analytics session."
+                goodbye_response = llm.invoke([HumanMessage(content=goodbye_prompt)])
+                
+                return {
+                    "messages": [AIMessage(content=goodbye_response.content)],
+                    "stage": "end"
+                }
+            except Exception:
+                # Fallback goodbye
+                return {
+                    "messages": [AIMessage(content="Thank you for using Business Analytics Chat! 👋")],
+                    "stage": "end"
+                }
         else:
-            # Use LLM to generate clarification message
-            clarify_prompt = f"""
-            User gave unclear response: {user_input}
-            Generate a polite message asking them to clarify with yes or no for continuing with another analysis.
-            """
-            clarify_response = llm.invoke([HumanMessage(content=clarify_prompt)])
-            
-            return {
-                "messages": [AIMessage(content=clarify_response.content)],
-                "stage": "complete"
-            }
+            try:
+                # Use LLM to generate clarification message
+                clarify_prompt = f"""
+                User gave unclear response: {user_input}
+                Generate a polite message asking them to clarify with yes or no for continuing with another analysis.
+                """
+                clarify_response = llm.invoke([HumanMessage(content=clarify_prompt)])
+                
+                return {
+                    "messages": [AIMessage(content=clarify_response.content)],
+                    "stage": "complete"
+                }
+            except Exception:
+                # Fallback clarification
+                return {
+                    "messages": [AIMessage(content="Please answer with 'yes' or 'no'. Would you like to analyze another date?")],
+                    "stage": "complete"
+                }
     
     return state
 
@@ -554,10 +703,3 @@ if __name__ == "__main__":
             print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
-
-
-
-
-
-
-
